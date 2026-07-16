@@ -1,0 +1,17 @@
+{
+    "default_policy": "fast-chat",
+    "models": {
+        "fast-chat": {
+            "backend": "ollama",
+            "model": "qwen3:8b"
+        },
+        "coding": {
+            "backend": "ollama",
+            "model": "qwen3:8b"
+        },
+        "reasoning": {
+            "backend": "ollama",
+            "model": "qwen3:8b"
+        }
+    }
+}
