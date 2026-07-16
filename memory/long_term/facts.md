@@ -1,0 +1,2 @@
+- Shaz is building SHAZ as a long-term personal AI system.
+- my main AI project is SHAZ.
