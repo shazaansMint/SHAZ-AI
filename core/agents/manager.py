@@ -25,7 +25,7 @@ class AgentManager:
         agent = self.find_agent(intent)
 
         if agent is None:
-            return None
+            agent = self.find_agent("conversation")
 
         return await agent.run(
             message,

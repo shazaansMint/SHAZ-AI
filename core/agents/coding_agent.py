@@ -13,8 +13,16 @@ class CodingAgent(Agent):
         return True
 
     async def run(self, message, context=None):
+        context = context or {}
+        identity = context.get("identity", "")
+        memory = context.get("memory", "")
+
         response = await self.gateway.generate(
             [
+                {
+                    "role": "system",
+                    "content": identity,
+                },
                 {
                     "role": "system",
                     "content": (
@@ -24,6 +32,10 @@ class CodingAgent(Agent):
                         "and improve code. "
                         "Be practical and explain things clearly."
                     ),
+                },
+                {
+                    "role": "system",
+                    "content": f"Known SHAZ memory:\n{memory}",
                 },
                 {
                     "role": "user",
