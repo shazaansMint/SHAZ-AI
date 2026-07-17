@@ -40,6 +40,7 @@ class ToolGateway:
     async def execute(
         self,
         tool_name,
+        confirmed=False,
         **kwargs,
     ):
         tool = self.registry.get(
@@ -51,18 +52,14 @@ class ToolGateway:
                 f"Unknown tool: {tool_name}"
             )
 
-        permission = (
-            self.permissions.check(
-                tool.action
-            )
-        )
+        permission = self.permission_for(tool_name)
 
         if permission == "blocked":
             raise PermissionError(
                 f"Tool blocked: {tool_name}"
             )
 
-        if permission == "confirm":
+        if permission == "confirm" and not confirmed:
             raise PermissionError(
                 f"Confirmation required for: "
                 f"{tool_name}"
@@ -83,6 +80,16 @@ class ToolGateway:
         )
 
         return result
+
+    def permission_for(self, tool_name):
+        tool = self.registry.get(tool_name)
+
+        if tool is None:
+            raise ValueError(
+                f"Unknown tool: {tool_name}"
+            )
+
+        return self.permissions.check(tool.action)
 
     def list_tools(self):
         return self.registry.list_tools()
