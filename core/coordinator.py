@@ -1,5 +1,7 @@
 from datetime import datetime
 from pathlib import Path
+import time
+import uuid
 
 from skills.calculator.calculator import (
     calculate,
@@ -27,6 +29,8 @@ JOURNAL_FILE = (
     / "journal"
     / "activity.log"
 )
+
+CONFIRMATION_TIMEOUT_SECONDS = 300
 
 
 class SHAZCoordinator:
@@ -80,6 +84,15 @@ class SHAZCoordinator:
                 f"Received confirmation reply: {message}"
             )
             return await self._handle_confirmation(message)
+
+        action, request_id = self._parse_confirmation_command(message)
+
+        if action:
+            return self._tool_response(
+                "tool_confirmation",
+                "No pending confirmation request.",
+                status="no_pending_request",
+            )
 
         intent = self.router.route(message)
 
@@ -154,9 +167,7 @@ class SHAZCoordinator:
                 "Write preview:\n"
                 f"Path: {path}\n"
                 "Content:\n"
-                f"{content}\n\n"
-                "Reply 'confirm' to write this file or 'cancel' "
-                "to stop."
+                f"{content}"
             )
 
             return await self._request_tool(
@@ -206,17 +217,29 @@ class SHAZCoordinator:
             )
 
         if permission == "confirm":
+            request_id = str(uuid.uuid4())
+            expires_at = (
+                self._now() + CONFIRMATION_TIMEOUT_SECONDS
+            )
+
             self.pending_tool = {
                 "intent": intent,
                 "tool_name": tool_name,
                 "kwargs": kwargs,
+                "request_id": request_id,
+                "expires_at": expires_at,
             }
 
             if preview is None:
-                preview = (
-                    "Confirmation required. Reply 'confirm' to continue "
-                    "or 'cancel' to stop."
-                )
+                preview = "Confirmation required."
+
+            preview = (
+                f"{preview}\n\n"
+                f"Request ID: {request_id}\n"
+                "Reply 'confirm "
+                f"{request_id}' to continue or 'cancel "
+                f"{request_id}' to stop."
+            )
 
             return self._tool_response(
                 intent,
@@ -232,10 +255,42 @@ class SHAZCoordinator:
         )
 
     async def _handle_confirmation(self, message):
-        reply = message.strip().lower()
+        pending_tool = self.pending_tool
+        request_id = pending_tool["request_id"]
 
-        if reply in {"confirm", "yes", "y"}:
-            pending_tool = self.pending_tool
+        if self._now() >= pending_tool["expires_at"]:
+            self.pending_tool = None
+            self.log_activity(
+                f"Confirmation request expired: {request_id}"
+            )
+
+            return self._tool_response(
+                "tool_confirmation",
+                f"Confirmation request {request_id} has expired.",
+                status="expired",
+            )
+
+        action, supplied_request_id = (
+            self._parse_confirmation_command(message)
+        )
+
+        if action is None or supplied_request_id is None:
+            return self._tool_response(
+                "tool_confirmation",
+                "Use 'confirm "
+                f"{request_id}' or 'cancel {request_id}'.",
+                status="confirmation_required",
+            )
+
+        if supplied_request_id != request_id:
+            return self._tool_response(
+                "tool_confirmation",
+                "The confirmation request ID does not match the "
+                "pending request.",
+                status="confirmation_required",
+            )
+
+        if action == "confirm":
             self.pending_tool = None
 
             return await self._execute_tool(
@@ -245,7 +300,7 @@ class SHAZCoordinator:
                 **pending_tool["kwargs"],
             )
 
-        if reply in {"cancel", "no", "n"}:
+        if action == "cancel":
             self.pending_tool = None
             self.log_activity("Pending tool request cancelled.")
 
@@ -255,12 +310,24 @@ class SHAZCoordinator:
                 status="cancelled",
             )
 
-        return self._tool_response(
-            "tool_confirmation",
-            "A tool request is waiting. Reply 'confirm' to continue "
-            "or 'cancel' to stop.",
-            status="confirmation_required",
-        )
+    def _parse_confirmation_command(self, message):
+        command = message.strip().split(maxsplit=1)
+
+        if not command:
+            return None, None
+
+        action = command[0].lower()
+
+        if action not in {"confirm", "cancel"}:
+            return None, None
+
+        if len(command) == 1:
+            return action, None
+
+        return action, command[1].strip()
+
+    def _now(self):
+        return time.monotonic()
 
     async def _execute_tool(
         self,

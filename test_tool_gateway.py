@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from uuid import UUID
 
 from core.tools.tool_gateway import ToolGateway
 from core.coordinator import SHAZCoordinator
@@ -59,28 +60,63 @@ async def main():
     assert calls == ["confirmed"]
 
     coordinator = SHAZCoordinator.__new__(SHAZCoordinator)
-    coordinator.pending_tool = {
-        "intent": "test",
-        "tool_name": "confirmation_required",
-        "kwargs": {},
-    }
+    current_time = 100.0
+    coordinator.pending_tool = None
     coordinator.tool_gateway = gateway
     coordinator.log_activity = lambda message: None
+    coordinator._now = lambda: current_time
 
-    confirmed = await coordinator.process("confirm")
+    pending = await coordinator._request_tool(
+        "test",
+        "confirmation_required",
+    )
+    request_id = coordinator.pending_tool["request_id"]
+
+    UUID(request_id)
+    assert request_id in pending["result"]["response"]
+    assert coordinator.pending_tool["expires_at"] == 400.0
+
+    missing_id = await coordinator.process("confirm")
+
+    assert missing_id["result"]["status"] == "confirmation_required"
+    assert coordinator.pending_tool["request_id"] == request_id
+    assert calls == ["confirmed"]
+
+    incorrect = await coordinator.process("confirm incorrect-id")
+
+    assert incorrect["result"]["status"] == "confirmation_required"
+    assert coordinator.pending_tool["request_id"] == request_id
+    assert calls == ["confirmed"]
+
+    confirmed = await coordinator.process(f"confirm {request_id}")
 
     assert confirmed["result"]["response"] == "Confirmed tool ran."
     assert calls == ["confirmed", "confirmed"]
+    assert coordinator.pending_tool is None
 
-    coordinator.pending_tool = {
-        "intent": "test",
-        "tool_name": "confirmation_required",
-        "kwargs": {},
-    }
+    duplicate = await coordinator.process(f"confirm {request_id}")
 
-    cancelled = await coordinator.process("cancel")
+    assert duplicate["result"]["status"] == "no_pending_request"
+    assert calls == ["confirmed", "confirmed"]
+
+    await coordinator._request_tool("test", "confirmation_required")
+    cancellation_id = coordinator.pending_tool["request_id"]
+    assert cancellation_id != request_id
+
+    cancelled = await coordinator.process(f"cancel {cancellation_id}")
 
     assert cancelled["result"]["status"] == "cancelled"
+    assert coordinator.pending_tool is None
+    assert calls == ["confirmed", "confirmed"]
+
+    await coordinator._request_tool("test", "confirmation_required")
+    expired_id = coordinator.pending_tool["request_id"]
+    assert expired_id not in {request_id, cancellation_id}
+    current_time = 401.0
+
+    expired = await coordinator.process(f"confirm {expired_id}")
+
+    assert expired["result"]["status"] == "expired"
     assert coordinator.pending_tool is None
     assert calls == ["confirmed", "confirmed"]
 
@@ -91,6 +127,7 @@ async def main():
         file_coordinator.pending_tool = None
         file_coordinator.tool_gateway = ToolGateway()
         file_coordinator.log_activity = lambda message: None
+        file_coordinator._now = lambda: 100.0
         file_coordinator.memory = type(
             "Memory",
             (),
@@ -111,9 +148,13 @@ async def main():
         assert preview["result"]["status"] == "confirmation_required"
         assert "Path: notes/today.txt" in preview["result"]["response"]
         assert "Content:\nBuy milk" in preview["result"]["response"]
+        write_request_id = file_coordinator.pending_tool["request_id"]
+        assert write_request_id in preview["result"]["response"]
         assert not (project_root / "notes" / "today.txt").exists()
 
-        written = await file_coordinator.process("confirm")
+        written = await file_coordinator.process(
+            f"confirm {write_request_id}"
+        )
 
         assert written["result"]["response"] == (
             "Wrote 8 characters to notes/today.txt."
@@ -123,10 +164,14 @@ async def main():
         ).read_text(encoding="utf-8") == "Buy milk"
 
         cancelled_path = project_root / "notes" / "cancelled.txt"
-        await file_coordinator.process(
+        cancelled_preview = await file_coordinator.process(
             "write file notes/cancelled.txt :: Do not write"
         )
-        cancelled_write = await file_coordinator.process("cancel")
+        cancelled_request_id = file_coordinator.pending_tool["request_id"]
+        assert cancelled_request_id in cancelled_preview["result"]["response"]
+        cancelled_write = await file_coordinator.process(
+            f"cancel {cancelled_request_id}"
+        )
 
         assert cancelled_write["result"]["status"] == "cancelled"
         assert not cancelled_path.exists()
