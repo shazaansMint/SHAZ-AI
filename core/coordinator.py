@@ -49,6 +49,14 @@ class SHAZCoordinator:
             action="read",
             function=file_tool.read,
         )
+        self.tool_gateway.register(
+            name="file_write",
+            description=(
+                "Write a text file inside the SHAZ project."
+            ),
+            action="write",
+            function=file_tool.write,
+        )
 
     def log_activity(self, message):
         timestamp = datetime.now().strftime(
@@ -130,6 +138,35 @@ class SHAZCoordinator:
                 path=path,
             )
 
+        if intent == "file_write":
+            request = message.strip()[len("write file"):].strip()
+            path, separator, content = request.partition("::")
+            path = path.strip()
+
+            if not separator or not path:
+                return self._tool_response(
+                    intent,
+                    "Use: write file <relative-path> :: <content>",
+                )
+
+            content = content.lstrip()
+            preview = (
+                "Write preview:\n"
+                f"Path: {path}\n"
+                "Content:\n"
+                f"{content}\n\n"
+                "Reply 'confirm' to write this file or 'cancel' "
+                "to stop."
+            )
+
+            return await self._request_tool(
+                intent,
+                "file_write",
+                preview=preview,
+                path=path,
+                content=content,
+            )
+
         context = {
             "identity": self.identity,
             "memory": self.memory.read(),
@@ -154,6 +191,7 @@ class SHAZCoordinator:
         self,
         intent,
         tool_name,
+        preview=None,
         **kwargs,
     ):
         try:
@@ -174,10 +212,15 @@ class SHAZCoordinator:
                 "kwargs": kwargs,
             }
 
+            if preview is None:
+                preview = (
+                    "Confirmation required. Reply 'confirm' to continue "
+                    "or 'cancel' to stop."
+                )
+
             return self._tool_response(
                 intent,
-                "Confirmation required. Reply 'confirm' to continue "
-                "or 'cancel' to stop.",
+                preview,
                 status="confirmation_required",
             )
 

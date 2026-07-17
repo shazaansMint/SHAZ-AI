@@ -5,6 +5,9 @@ class IntentRouter:
     def route(self, message):
         text = message.lower()
 
+        if text == "write file" or text.startswith("write file "):
+            return "file_write"
+
         if text == "read file" or text.startswith("read file "):
             return "file_read"
 
