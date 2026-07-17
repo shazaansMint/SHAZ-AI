@@ -163,6 +163,45 @@ async def main():
             project_root / "notes" / "today.txt"
         ).read_text(encoding="utf-8") == "Buy milk"
 
+        natural_preview = await file_coordinator.process(
+            "I want you to create a note saying that today we made "
+            "SHAZ capable of safely reading and writing files."
+        )
+
+        assert natural_preview["intent"] == "file_write"
+        assert natural_preview["result"]["status"] == "confirmation_required"
+        assert "Path: notes/today.txt" in natural_preview["result"]["response"]
+        assert (
+            "Content:\nToday we made SHAZ capable of safely reading "
+            "and writing files."
+        ) in natural_preview["result"]["response"]
+        natural_request_id = file_coordinator.pending_tool["request_id"]
+        assert natural_request_id in natural_preview["result"]["response"]
+        assert (
+            project_root / "notes" / "today.txt"
+        ).read_text(encoding="utf-8") == "Buy milk"
+
+        natural_written = await file_coordinator.process(
+            f"confirm {natural_request_id}"
+        )
+
+        assert natural_written["result"]["response"] == (
+            "Wrote 63 characters to notes/today.txt."
+        )
+        assert (
+            project_root / "notes" / "today.txt"
+        ).read_text(encoding="utf-8") == (
+            "Today we made SHAZ capable of safely reading and writing files."
+        )
+
+        assert file_coordinator.router.route(
+            "Could you create a note for me?"
+        ) == "conversation"
+        assert file_coordinator.router.route("What is 12 + 8?") == "calculator"
+        assert file_coordinator.router.route(
+            "Help me debug this Python code."
+        ) == "coding"
+
         cancelled_path = project_root / "notes" / "cancelled.txt"
         cancelled_preview = await file_coordinator.process(
             "write file notes/cancelled.txt :: Do not write"

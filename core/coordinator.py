@@ -152,17 +152,30 @@ class SHAZCoordinator:
             )
 
         if intent == "file_write":
-            request = message.strip()[len("write file"):].strip()
-            path, separator, content = request.partition("::")
-            path = path.strip()
+            if message.strip().lower().startswith("write file"):
+                request = message.strip()[len("write file"):].strip()
+                path, separator, content = request.partition("::")
+                path = path.strip()
 
-            if not separator or not path:
-                return self._tool_response(
-                    intent,
-                    "Use: write file <relative-path> :: <content>",
-                )
+                if not separator or not path:
+                    return self._tool_response(
+                        intent,
+                        "Use: write file <relative-path> :: <content>",
+                    )
 
-            content = content.lstrip()
+                content = content.lstrip()
+            else:
+                note_request = self.router.note_write_request(message)
+
+                if note_request is None:
+                    return self._tool_response(
+                        intent,
+                        "Use: write file <relative-path> :: <content>",
+                    )
+
+                path = "notes/today.txt"
+                content = note_request["content"]
+
             preview = (
                 "Write preview:\n"
                 f"Path: {path}\n"
